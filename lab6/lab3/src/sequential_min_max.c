@@ -4,6 +4,7 @@
 #include "find_min_max.h"
 #include "utils.h"
 
+
 //#define debug
 #ifdef debug
 #include "find_min_max.c"
@@ -45,7 +46,7 @@ int main(int argc, char **argv) {
   printf("Source array \n");
   for(i=0;i<array_size;i++)
   {
-    printf("%d ",array[i]);
+	  printf("%d ",array[i]);
   }
   printf("\n");
   free(array);
@@ -55,4 +56,3 @@ int main(int argc, char **argv) {
 
   return 0;
 }
-

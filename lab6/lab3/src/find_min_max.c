@@ -10,11 +10,11 @@ struct MinMax GetMinMax(int *array, unsigned int begin, unsigned int end) {
   for ( i = begin; i <= end; i++) 
   {
    if ( array[i]<min_max.min) 
-     min_max.min=array[i];
+	   min_max.min=array[i];
    if ( array[i]>min_max.max )
-     min_max.max=array[i];
+	   min_max.max=array[i];
   }
 
+  // your code here
   return min_max;
 }
-

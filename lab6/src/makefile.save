@@ -1,0 +1,19 @@
+CC=gcc
+CFLAGS=-I.
+.PHONY : client3 server3
+
+all : client3 server3
+
+#sequential_min_max : utils.o find_min_max.o utils.h find_min_max.h
+#   $(CC) -o sequential_min_max find_min_max.o utils.o sequential_min_max.c $(CFLAGS)
+
+client3 : 
+    $(CC) -o client3 client3.c $(CFLAGS)
+
+server3 : 
+    $(CC) -o server3 server3.c -lpthread $(CFLAGS)
+
+clean :
+    rm -f client3 server3
+
+

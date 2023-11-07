@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -15,7 +15,7 @@
 #include "find_min_max.h"
 #include "utils.h"
 
-//#define debug
+#define debug
 #ifdef debug
 #include "find_min_max.c"
 #include "utils.c"
@@ -47,6 +47,7 @@ int main(int argc, char **argv) {
   argc=8; // кол-во аргументов в argv2
   argv=argv2; // подмена аргументов командной строки своей
   #endif
+
 
   
   while (true) {
@@ -138,8 +139,6 @@ int main(int argc, char **argv) {
   }
   GenerateArray(array, array_size, seed);
  
-  
-  
   // выводим исходный массив
   printf("Source array\n");
   for (int i = 0; i < array_size; i++)
@@ -150,11 +149,12 @@ int main(int argc, char **argv) {
   printf("\n"); // только после перевода каретки данные выводятся в терминал
 
   
-
-  // создаем указтель на массив межпроцессорных каналов
-  int *pipes_ar;
-  // Создаем указатель на массив ФИФО Буферов
-  int *fifo_ar;
+//----------------------------------------------------
+// --- Создание каналов для IPC
+//-----------------------------------------------
+  // создаем указатель на массив межпроцессорных каналов
+  int *pipes_ar=NULL;
+  int *fifo_ar=NULL;
   if (!with_files) 
   {
     // IPC через pipe
@@ -198,14 +198,20 @@ int main(int argc, char **argv) {
         {
             printf("Error created dir\n");
         }
+        else{
+          printf("Created dir ./buf\n");
+        }
+    }
+    else{
+      printf("Exists dir ./buf\n");
     }
     // создаем массив дескрипторов
-    fifo_ar=malloc(sizeof(int)*pnum);
+    fifo_ar=(int* ) malloc(sizeof(int)*pnum);
     // проверяем наличие файла буфера
     for (int i = 0; i < pnum; i++)
     {
-        /* code */
-        memset(buffer,'\0',BUFSIZ );
+        // code
+        // memset(buffer,'\0',BUFSIZ );
         sprintf(buffer,"./buf/fifo%d",i);
         if (access(buffer,F_OK)==-1)
         {
@@ -213,29 +219,105 @@ int main(int argc, char **argv) {
             res = mkfifo(buffer,0777);
             if (res!=0)
             {
-                printf("Error created fifo%d\n",i);
+                printf("Error created %s\n",buffer);
+            }
+            else {
+              printf("Created buffet %s\n",buffer);
             }
         }
+        else{
+          printf("Exists buffer %s\n",buffer);
+        }
+
     }
   }
-
+//------------------------------
+//-------- Конец создания каналов IPC
+//--------------------------------------
   struct timeval start_time;
   gettimeofday(&start_time, NULL);
 
   // Кол-во запущенных процессов
   int active_child_processes = 0;
-  // Вычисляем границы
+  // Вычисляем границы для распределения массива по процессам
   int sizemin=array_size/pnum;
   int ost=array_size%pnum;
 
+
   for (int i = 0; i < pnum; i++) {
-    // Подготавливаем название файла
-    if (with_files) {
-          // use files here
-          memset(buffer,'\0',BUFSIZ );
-          sprintf(buffer,"./buf/fifo%d",i);
-        } 
+    sprintf(buffer,"./buf/fifo%d",i);
     pid_t child_pid = fork();
+    switch (child_pid)
+    {
+    case -1:
+      printf("Fork failed!\n");
+      return -1;
+      break;
+    case 0:
+    //---------------
+    //--- child process
+    //--------------------
+      if (with_files)
+      {
+        // закрываем файлы ФИФО буффера для чтения
+        for (int j = 0; j < i; j++)
+        {
+          close(fifo_ar[j]);
+        }
+        // сохраняем дескриптор файла для записи
+          fifo_ar[i]=open(buffer,O_WRONLY);
+      }
+      
+      printf("Process %d pid=%d \n",i,getpid());
+      struct MinMax min_max;
+        if (i+1<=ost)
+        {
+          min_max=GetMinMax(array, i*(sizemin+1), (i+1)*(sizemin+1)-1);
+          
+          for (int j = i*(sizemin+1); j <= (i+1)*(sizemin+1)-1; j++)
+          {
+            printf("%d ",array[j]);
+            // code 
+          }
+        }
+        else
+        {
+          min_max=GetMinMax(array, ost*(sizemin+1)+(i-ost)*sizemin, ost*(sizemin+1)+(i-ost+1)*sizemin-1 );
+          
+          for (int j = ost*(sizemin+1)+(i-ost)*sizemin; j <= ost*(sizemin+1)+(i-ost+1)*sizemin-1; j++)
+          {
+            printf("%d ",array[j]);
+            // code 
+          }
+        }
+        printf("\nMin=%d Max=%d\n",min_max.min,min_max.max);
+        // parallel somehow
+        //  memset(buffer,'\0',sizeof(buffer));
+          sprintf(buffer,"%d %d",min_max.min,min_max.max);
+      if (with_files) {
+          // use files here
+          write(fifo_ar[i],buffer,BUFSIZ);
+           // закрываем файл
+          close(fifo_ar[i]);
+        } else {
+          // use pipe here
+          write(pipes_ar[i*2+1], buffer, strlen(buffer));
+        }
+      return i;
+      break;
+      ///------------------------
+      //--------End child
+      //-----------------------------
+    default:
+      // parent
+       if (with_files)
+        {
+          fifo_ar[i]=open(buffer,O_RDONLY);
+        }
+      break;
+    }    
+
+    /*
     if (child_pid >= 0) 
     {
       // successful fork
@@ -258,7 +340,7 @@ int main(int argc, char **argv) {
           for (int j = i*(sizemin+1); j <= (i+1)*(sizemin+1)-1; j++)
           {
             printf("%d ",array[j]);
-            /* code */
+            // code 
           }
           printf("\nMin=%d Max=%d\n",min_max.min,min_max.max);
           
@@ -270,7 +352,7 @@ int main(int argc, char **argv) {
           for (int j = ost*(sizemin+1)+(i-ost)*sizemin; j <= ost*(sizemin+1)+(i-ost+1)*sizemin-1; j++)
           {
             printf("%d ",array[j]);
-            /* code */
+            // code 
           }
           printf("\nMin=%d Max=%d\n",min_max.min,min_max.max);
         }
@@ -304,8 +386,56 @@ int main(int argc, char **argv) {
       printf("Fork failed!\n");
       return -1;
     }
-  }
 
+    */
+  }
+  // Структура для сохранения макс и мин числа
+  struct MinMax min_max;
+  min_max.min = INT_MAX;
+  min_max.max = INT_MIN;
+  // номер завершенного процесса
+  int ret; 
+  for (int i = 0; i < pnum; i++)
+  {
+    pid_t p=wait(&stat_val);
+    if (WIFEXITED(stat_val))
+    {
+      // процесс завершен штатно
+      // получаем номер завершенного процесса
+      ret=WEXITSTATUS(stat_val);
+      if (with_files)
+      {
+          read(fifo_ar[ret],buffer,BUFSIZ);
+          close(fifo_ar[ret]);
+      }
+      else
+      {
+        read(pipes_ar[ret*2], buffer, BUFSIZ);
+      }
+
+      int min, max;
+      printf("Process %d = %s \n",ret,buffer);
+      sscanf(buffer,"%d %d", &min,&max);
+
+      if (min < min_max.min) 
+      {
+        min_max.min = min;
+      }
+      if (max > min_max.max) 
+      {
+        min_max.max = max;
+      }
+    }
+    else
+    {
+      // ошибка при выполнении процесса
+      printf("Error process %d, pid=%d\n",ret,p);
+    }
+  }
+  
+ 
+
+  /*
   while (active_child_processes > 0) {
     // your code here
     wait(&stat_val);
@@ -340,7 +470,7 @@ int main(int argc, char **argv) {
       min_max.max = max;
     }
   }
-
+  */
   struct timeval finish_time;
   gettimeofday(&finish_time, NULL);
 
@@ -350,6 +480,12 @@ int main(int argc, char **argv) {
   free(array);
   if (with_files)
   {
+    // Закрываем все ФИФО буферы
+    for (int i = 0; i < pnum; i++)
+    {
+      close(fifo_ar[i]);
+    }
+    // освобождаем память
     free(fifo_ar);
   }
   else
@@ -359,7 +495,5 @@ int main(int argc, char **argv) {
   printf("Min: %d\n", min_max.min);
   printf("Max: %d\n", min_max.max);
   printf("Elapsed time: %fms\n", elapsed_time);
-  fflush(NULL);
   return 0;
 }
-
